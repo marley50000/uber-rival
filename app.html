@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transport App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        @keyframes blast {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .blast-animation {
+            animation: blast 0.3s ease-out;
+        }
+        .hover-grow {
+            transition: transform 0.2s ease;
+        }
+        .hover-grow:hover {
+            transform: scale(1.05);
+        }
+        .click-press {
+            transition: transform 0.1s ease;
+        }
+        .click-press:active {
+            transform: scale(0.95);
+        }
+        .smooth-transition {
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <!-- Add splash screen -->
+    <div id="splash-screen" class="fixed inset-0 bg-white flex items-center justify-center z-50">
+        <div class="text-center">
+            <img src="Spark Rides vid.gif" alt="Spark Rides Logo" class="w-64 md:w-80 mx-auto mb-6 animate-pulse">
+            <div class="w-48 h-2 bg-gray-200 rounded-full mx-auto overflow-hidden">
+                <div id="loading-bar" class="w-0 h-full bg-blue-600 transition-all duration-[5000ms]"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Wrap existing content in a hidden div -->
+    <div id="main-content" class="hidden">
+        <!-- Your existing content starts here -->
+        <div class="container mx-auto p-6 max-w-3xl">
+            <h1 class="text-3xl font-extrabold text-center mb-6 text-blue-600">Find Your Ride</h1>
+        
+        <div class="bg-white p-4 rounded-lg shadow-md mb-4">
+            <form id="routeForm" onsubmit="searchRoute(event)">
+                <div class="flex gap-4 mb-4">
+                    <div class="flex-1">
+                        <input type="text" id="pickup" name="pickup" 
+                            class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 text-lg" 
+                            placeholder="Enter pickup location" required>
+                    </div>
+                    <div class="flex-1">
+                        <input type="text" id="destination" name="destination" 
+                            class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 text-lg" 
+                            placeholder="Where are you going?" required>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="submit" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 hover-grow click-press">
+                        🔍 Find Routes
+                    </button>
+                    <button type="button" onclick="getCurrentLocation()" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 hover-grow click-press">
+                        📍 Use My Location
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div id="map" class="w-full h-72 rounded-lg mt-6 shadow-md"></div>
+        
+        <div id="ride-listings" class="mt-6 space-y-4"></div>
+        
+        <div id="pickup-points" class="mt-6 bg-white p-5 rounded-lg shadow-md hidden">
+            <h2 class="text-xl font-bold mb-3 text-blue-600">Suggested Pickup Points</h2>
+            <ul id="pickup-list" class="list-disc pl-5 text-gray-700"></ul>
+        </div>
+    </div>
+    <style>
+        /* Remove blast animation and add particle effect */
+        @keyframes particle {
+            0% { transform: translate(0, 0) scale(0); opacity: 1; }
+            100% { transform: translate(var(--x), var(--y)) scale(1); opacity: 0; }
+        }
+        
+        .particle-container {
+            position: absolute;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        @keyframes transportParticle {
+            0% { transform: translate(0, 0) scale(0) rotate(0deg); opacity: 1; }
+            100% { transform: translate(var(--x), var(--y)) scale(1) rotate(var(--rotate)); opacity: 0; }
+        }
+        .transport-particle {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            animation: transportParticle 1s ease-out forwards;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            pointer-events: none;
+        }
+        .particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: linear-gradient(45deg, #3b82f6, #60a5fa);
+            border-radius: 50%;
+            animation: particle 0.8s ease-out forwards;
+        }
+        .button-glow {
+            transition: box-shadow 0.3s ease;
+        }
+        .button-glow:hover {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.6);
+        }
+        .click-scale {
+            transition: transform 0.2s ease;
+        }
+        .click-scale:active {
+            transform: scale(0.95);
+        }
+    </style>
+    <script>
+        let map = L.map('map').setView([5.6037, -0.1870], 12);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        function addBlastAnimation(button) {
+            button.classList.add('blast-animation');
+            setTimeout(() => {
+                button.classList.remove('blast-animation');
+            }, 300);
+        }
+    function createParticles(event) {
+        const button = event.target;
+        const rect = button.getBoundingClientRect();
+        const particleCount = 30;
+        
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement('div');
+            particle.classList.add('particle');
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * 50;
+            const x = Math.cos(angle) * distance;
+            const y = Math.sin(angle) * distance;
+            
+            particle.style.setProperty('--x', `${x}px`);
+            particle.style.setProperty('--y', `${y}px`);
+            particle.style.left = `${rect.left + rect.width / 2 - 4}px`;
+            particle.style.top = `${rect.top + rect.height / 2 - 4}px`;
+            
+            document.body.appendChild(particle);
+            
+            particle.addEventListener('animationend', () => {
+                particle.remove();
+            });
+        }
+    }
+    function searchLocation() {
+        createTransportParticles(event); // Replace addBlastAnimation with createTransportParticles
+        var query = document.getElementById('destination').value.trim();
+            if (!query) {
+                alert("Please enter a location.");
+                return;
+            }
+
+            axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+                .then(response => {
+                    if (response.data.length > 0) {
+                        var location = response.data[0];
+                        var lat = parseFloat(location.lat);
+                        var lon = parseFloat(location.lon);
+                        map.setView([lat, lon], 14);
+                        L.marker([lat, lon]).addTo(map)
+                            .bindPopup(location.display_name).openPopup();
+                        displayRides(lat, lon, location.display_name);
+                        suggestPickupPoints(location.display_name, lat, lon);
+                    } else {
+                        alert("Location not found. Try another search.");
+                    }
+                })
+                .catch(error => {
+                    alert("Error retrieving location. Please check your internet connection and try again.");
+                });
+        }
+
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        document.getElementById('pickup').value = `${lat},${lon}`;
+                        
+                        // Update the map marker if map exists
+                        if (typeof map !== 'undefined') {
+                            map.setView([lat, lon], 13);
+                            L.marker([lat, lon]).addTo(map)
+                                .bindPopup('Your Location')
+                                .openPopup();
+                        }
+                    },
+                    (error) => {
+                        console.error('Error getting location:', error);
+                        alert('Could not get your current location. Please enter it manually.');
+                    }
+                );
+            } else {
+                alert('Geolocation is not supported by your browser');
+            }
+        }
+    // Add this new function for the transport particles effect
+    function createTransportParticles(event) {
+        const button = event.target;
+        const rect = button.getBoundingClientRect();
+        const particleCount = 10;
+        const transportEmojis = ['🚗', '🚌', '🚐', '🚅', '🚊', '🚖', '🚘', '🚍', '🚆', '✈️'];
+        
+        for (let i = 0; i < particleCount; i++) {
+            const particle = document.createElement('div');
+            particle.classList.add('transport-particle');
+            
+            particle.textContent = transportEmojis[Math.floor(Math.random() * transportEmojis.length)];
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = Math.random() * 100 + 50;
+            const x = Math.cos(angle) * distance;
+            const y = Math.sin(angle) * distance;
+            const rotation = Math.random() * 360;
+            
+            particle.style.setProperty('--x', `${x}px`);
+            particle.style.setProperty('--y', `${y}px`);
+            particle.style.setProperty('--rotate', `${rotation}deg`);
+            particle.style.left = `${rect.left + rect.width / 2 - 12}px`;
+            particle.style.top = `${rect.top + rect.height / 2 - 12}px`;
+            
+            document.body.appendChild(particle);
+            
+            particle.addEventListener('animationend', () => {
+                particle.remove();
+            });
+        }
+    }
+        async function displayRides(lat, lon, locationName) {
+            const rides = [
+                { type: 'Motorcycle', icon: '🏍️' },
+                { type: 'Trotro', icon: '🚐' },
+                { type: 'Private Car', icon: '🚗' },
+                { type: 'Train', icon: '🚆' },
+                { type: 'Bus', icon: '🚌' },
+                { type: 'Uber', icon: '🚖' }
+            ];
+            
+            document.getElementById('ride-listings').innerHTML = 'Loading estimates...';
+            let rideHTML = '';
+            
+            // Get user's pickup location
+            const pickupLocation = document.getElementById('pickup').value || 'Current Location';
+            const userLocation = lat && lon ? `${lat},${lon}` : pickupLocation;
+            
+            for (const ride of rides) {
+                try {
+                    const response = await fetch('/estimate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            origin: userLocation,
+                            destination: locationName,
+                            transport_type: ride.type,
+                            coordinates: lat && lon ? {
+                                pickup: { lat, lon },
+                                destination: locationName
+                            } : null
+                        })
+                    });
+        
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        console.error('Error:', data.error);
+                        continue;
+                    }
+        
+                    rideHTML += `
+                        <div class="bg-white p-5 rounded-lg shadow-md mb-4">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xl">${ride.icon}</span>
+                                    <div>
+                                        <h2 class="text-lg font-bold">${ride.type}</h2>
+                                        <p class="text-gray-600">From: ${userLocation}</p>
+                                        <p class="text-gray-600">To: ${data.location_info.address}</p>
+                                        <p class="text-gray-600">${data.transport_details.wait_time}</p>
+                                        <p class="text-sm text-gray-500">${data.location_info.details}</p>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <p class="font-semibold text-blue-600 text-xl">GHS ${parseFloat(data.estimated_fare).toFixed(2)}</p>
+                                </div>
+                            </div>
+                        </div>`;
+                } catch (error) {
+                    console.error('Error getting estimate for', ride.type, ':', error);
+                }
+            }
+            
+            document.getElementById('ride-listings').innerHTML = rideHTML || 'No rides available';
+        }
+        
+        // Remove these lines from your app.html:
+        // - Remove loadFares() function
+        // - Remove transportFares variable
+        // - Remove any references to fares.json
+        function suggestPickupPoints(locationName, lat, lon) {
+            const pickupPoints = [
+                "Main Bus Station",
+                "Market Junction",
+                "Post Office Stop",
+                "City Mall Entrance",
+                "University Gate"
+            ];
+            
+            let pickupHTML = '';
+            pickupPoints.forEach(point => {
+                let googleMapsLink = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(point)},${lat},${lon}`;
+                pickupHTML += `<li><a href="${googleMapsLink}" target="_blank" class="text-blue-600 underline">${point} (near ${locationName.split(',')[0]})</a></li>`;
+            });
+            
+            document.getElementById('pickup-list').innerHTML = pickupHTML;
+            document.getElementById('pickup-points').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
+
+    <!-- Update the searchRoute function -->
+    <script>
+    async function searchRoute(event) {
+        event.preventDefault(); // Prevent form submission
+        createTransportParticles(event);
+        
+        const pickup = document.getElementById('pickup').value.trim();
+        const destination = document.getElementById('destination').value.trim();
+        
+        console.log('Pickup:', pickup); // Debug log
+        console.log('Destination:', destination); // Debug log
+
+        if (!pickup || !destination) {
+            alert("Please enter both pickup and destination locations.");
+            return;
+        }
+
+        try {
+            const [pickupResponse, destResponse] = await Promise.all([
+                axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickup)}`),
+                axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}`)
+            ]);
+
+            if (pickupResponse.data.length > 0 && destResponse.data.length > 0) {
+                const pickupLoc = pickupResponse.data[0];
+                const destLoc = destResponse.data[0];
+
+                // Clear existing markers
+                map.eachLayer((layer) => {
+                    if (layer instanceof L.Marker) {
+                        map.removeLayer(layer);
+                    }
+                });
+
+                // Add markers and create a route line
+                const pickupMarker = L.marker([pickupLoc.lat, pickupLoc.lon]).addTo(map)
+                    .bindPopup("Pickup: " + pickupLoc.display_name);
+                const destMarker = L.marker([destLoc.lat, destLoc.lon]).addTo(map)
+                    .bindPopup("Destination: " + destLoc.display_name);
+
+                // Draw a line between points
+                L.polyline([
+                    [pickupLoc.lat, pickupLoc.lon],
+                    [destLoc.lat, destLoc.lon]
+                ], {color: 'blue', weight: 3}).addTo(map);
+
+                // Fit map to show both markers
+                const bounds = L.latLngBounds([
+                    [pickupLoc.lat, pickupLoc.lon],
+                    [destLoc.lat, destLoc.lon]
+                ]);
+                map.fitBounds(bounds, { padding: [50, 50] });
+
+                displayRides(pickupLoc.lat, pickupLoc.lon, destLoc.display_name);
+                suggestPickupPoints(pickupLoc.display_name, pickupLoc.lat, pickupLoc.lon);
+            } else {
+                alert("One or both locations not found. Please try again.");
+            }
+        } catch (error) {
+            alert("Error finding locations. Please check your internet connection and try again.");
+        }
+    }
+    </script>
+
+<!-- Add this in your header or navigation area -->
+<div class="language-selector">
+    <div class="dropdown">
+        <button class="btn btn-secondary dropdown-toggle" type="button" id="languageDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="fas fa-globe"></i> <!-- Language icon -->
+        </button>
+        <ul class="dropdown-menu" aria-labelledby="languageDropdown">
+            <li><a class="dropdown-item" href="#" data-lang="en">English</a></li>
+            <li><a class="dropdown-item" href="#" data-lang="fr">Français</a></li>
+            <li><a class="dropdown-item" href="#" data-lang="tw">Twi</a></li>
+        </ul>
+    </div>
+</div>
+
+<!-- Add this in your head section -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+<!-- Add before closing body tag -->
+    <script>
+        // Handle splash screen
+        document.addEventListener('DOMContentLoaded', function() {
+            const splashScreen = document.getElementById('splash-screen');
+            const mainContent = document.getElementById('main-content');
+            const loadingBar = document.getElementById('loading-bar');
+            
+            // Animate loading bar
+            setTimeout(() => {
+                loadingBar.style.width = '100%';
+            }, 100);
+
+            // Hide splash screen after 5 seconds
+            setTimeout(() => {
+                splashScreen.style.opacity = '0';
+                splashScreen.style.transition = 'opacity 0.5s ease';
+                mainContent.classList.remove('hidden');
+                setTimeout(() => {
+                    splashScreen.remove();
+                }, 500);
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
+
+    <!-- Update the searchRoute function -->
+    <script>
+    async function searchRoute(event) {
+        event.preventDefault(); // Prevent form submission
+        createTransportParticles(event);
+        
+        const pickup = document.getElementById('pickup').value.trim();
+        const destination = document.getElementById('destination').value.trim();
+        
+        console.log('Pickup:', pickup); // Debug log
+        console.log('Destination:', destination); // Debug log
+
+        if (!pickup || !destination) {
+            alert("Please enter both pickup and destination locations.");
+            return;
+        }
+
+        try {
+            const [pickupResponse, destResponse] = await Promise.all([
+                axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickup)}`),
+                axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination)}`)
+            ]);
+
+            if (pickupResponse.data.length > 0 && destResponse.data.length > 0) {
+                const pickupLoc = pickupResponse.data[0];
+                const destLoc = destResponse.data[0];
+
+                // Clear existing markers
+                map.eachLayer((layer) => {
+                    if (layer instanceof L.Marker) {
+                        map.removeLayer(layer);
+                    }
+                });
+
+                // Add markers and create a route line
+                const pickupMarker = L.marker([pickupLoc.lat, pickupLoc.lon]).addTo(map)
+                    .bindPopup("Pickup: " + pickupLoc.display_name);
+                const destMarker = L.marker([destLoc.lat, destLoc.lon]).addTo(map)
+                    .bindPopup("Destination: " + destLoc.display_name);
+
+                // Draw a line between points
+                L.polyline([
+                    [pickupLoc.lat, pickupLoc.lon],
+                    [destLoc.lat, destLoc.lon]
+                ], {color: 'blue', weight: 3}).addTo(map);
+
+                // Fit map to show both markers
+                const bounds = L.latLngBounds([
+                    [pickupLoc.lat, pickupLoc.lon],
+                    [destLoc.lat, destLoc.lon]
+                ]);
+                map.fitBounds(bounds, { padding: [50, 50] });
+
+                displayRides(pickupLoc.lat, pickupLoc.lon, destLoc.display_name);
+                suggestPickupPoints(pickupLoc.display_name, pickupLoc.lat, pickupLoc.lon);
+            } else {
+                alert("One or both locations not found. Please try again.");
+            }
+        } catch (error) {
+            alert("Error finding locations. Please check your internet connection and try again.");
+        }
+    }
+    </script>
+
+<!-- Add this in your head section -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+<!-- Add this JavaScript before the closing body tag -->
+<script>
+document.querySelectorAll('.dropdown-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+        e.preventDefault();
+        const lang = e.target.dataset.lang;
+        fetch('/set-language', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ language: lang })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            }
+        });
+    });
+});
+</script>
+
+<style>
+.language-selector {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.language-selector .btn {
+    padding: 8px 15px;
+    border-radius: 20px;
+    background-color: #ffffff;
+    color: #333;
+    border: 1px solid #ddd;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.language-selector .dropdown-menu {
+    min-width: 120px;
+    border-radius: 10px;
+    margin-top: 5px;
+}
+
+.language-selector .dropdown-item {
+    padding: 8px 15px;
+}
+
+.language-selector .dropdown-item:hover {
+    background-color: #f8f9fa;
+}
+</style>
+<elevenlabs-convai agent-id="ITWy65vTYJ2HhLQMfiZu"></elevenlabs-convai><script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
