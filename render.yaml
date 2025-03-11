@@ -2,7 +2,7 @@ services:
   - type: web
     name: spark-rides
     env: python
-    buildCommand: pip install -r requirements.txt && python app.py
+    buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
       - key: PYTHON_VERSION
