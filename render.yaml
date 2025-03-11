@@ -5,5 +5,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.9.0
+      - key: GEMINI_API_KEY
+        value: "AIzaSyBfyeioijtuTAO1Vig2r-b-82NmYIZQOHg"
+      - key: SECRET_KEY
+        value: "your-secret-key-here"
