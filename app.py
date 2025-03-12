@@ -1,14 +1,19 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory, session
 from flask_cors import CORS
 import os
-from google import genai
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__, template_folder='.')
-app.secret_key = 'your-secret-key-here'  # Required for session management
+app.secret_key = 'your-secret-key-here'
 CORS(app)
 
-# Initialize Gemini client
-client = genai.Client(api_key="AIzaSyBfyeioijtuTAO1Vig2r-b-82NmYIZQOHg")
+# Initialize Gemini client (updated to use environment variable)
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+model = genai.GenerativeModel('gemini-pro')
 
 # Add supported languages
 SUPPORTED_LANGUAGES = {
@@ -86,10 +91,7 @@ def get_estimate():
     """
     
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
+        response = model.generate_content(prompt)  # Changed this line
         
         import json
         response_text = response.text.strip()
