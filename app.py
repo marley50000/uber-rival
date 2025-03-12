@@ -11,9 +11,9 @@ app = Flask(__name__, template_folder='.')
 app.secret_key = 'your-secret-key-here'
 CORS(app)
 
-# Initialize Gemini client (updated to use environment variable)
+# Initialize Gemini client with the correct model name
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-1.0-pro')  # Updated model name
 
 # Add supported languages
 SUPPORTED_LANGUAGES = {
